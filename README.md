@@ -1,0 +1,1 @@
+# AI-DefectDetector-IndustryHack2026
