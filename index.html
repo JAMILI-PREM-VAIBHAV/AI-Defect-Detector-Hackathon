@@ -3,202 +3,109 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI Manufacturing Defect Detector</title>
+<title>AI Manufacturing Defect Detector - Deep Learning</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.16.0"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet"></script>
 
 <style>
-*{margin:0;padding:0;box-sizing:border-box}
 body{
-    font-family:Segoe UI;
-    background:linear-gradient(135deg,#667eea,#764ba2);
-    min-height:100vh;padding:20px;
-}
-.container{max-width:1100px;margin:auto}
-.header{
-    background:white;padding:40px;border-radius:25px;
-    text-align:center;box-shadow:0 25px 50px rgba(0,0,0,.15);
-    margin-bottom:40px;
-}
-.upload-section{
-    background:white;padding:50px;border-radius:25px;
-    text-align:center;box-shadow:0 25px 50px rgba(0,0,0,.15);
-}
-.upload-area{
-    border:4px dashed #4f46e5;border-radius:20px;
-    padding:40px;margin:20px;cursor:pointer;
-}
-.analyze-btn{
-    background:#10b981;color:white;border:none;
-    padding:18px 50px;font-size:1.2em;border-radius:50px;
-    cursor:pointer;margin-top:15px;
-}
-.image-preview img{max-width:100%;max-height:420px;border-radius:20px;margin-top:25px}
-.metrics-grid{
-    display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
-    gap:25px;margin:40px 0;
-}
-.metric-card{
-    background:white;padding:30px;border-radius:20px;text-align:center;
-    box-shadow:0 15px 40px rgba(0,0,0,.1);
-}
-.metric-good{border-left:6px solid #10b981}
-.metric-bad{border-left:6px solid #ef4444}
-.metric-value{font-size:2.6em;font-weight:bold}
-.result-card{
-    padding:40px;border-radius:25px;text-align:center;
-    font-size:1.4em;margin:30px 0;
-}
-.result-pass{background:#d1fae5;border:4px solid #10b981}
-.result-fail{background:#fee2e2;border:4px solid #ef4444}
-.loading{padding:60px;text-align:center}
+font-family:Segoe UI;
+background:linear-gradient(135deg,#667eea,#764ba2);
+min-height:100vh;padding:30px;color:white;text-align:center}
+.card{background:white;color:black;padding:30px;border-radius:20px;margin:20px auto;max-width:900px}
+button{padding:15px 40px;font-size:18px;background:#10b981;color:white;border:none;border-radius:50px;cursor:pointer}
+.metric{font-size:32px;font-weight:bold}
+.pass{background:#d1fae5;border:4px solid #10b981}
+.fail{background:#fee2e2;border:4px solid #ef4444}
 </style>
 </head>
 
 <body>
-<div class="container">
 
-<div class="header">
-<h1>🤖 AI Manufacturing Defect Detector</h1>
-<p>Industry 4.0 Quality Control</p>
+<h1>🤖 Deep Learning Manufacturing Defect Detector</h1>
+<p>Powered by TensorFlow.js CNN</p>
+
+<div class="card">
+<input type="file" id="fileInput" accept="image/*">
+<br><br>
+<button onclick="analyze()">Run AI Inspection</button>
 </div>
 
-<div class="upload-section">
-<div class="upload-area" onclick="fileInput.click()">
-<h2>📸 Upload Product Image</h2>
-<p>Phone photos work perfectly</p>
-</div>
-<input type="file" id="fileInput" hidden accept="image/*" onchange="handleImageUpload(event)">
-<button id="analyzeBtn" class="analyze-btn" onclick="analyzeImage()" disabled>RUN AI ANALYSIS</button>
-</div>
-
-<div id="previewSection"></div>
-<div id="metricsSection"></div>
-<div id="resultSection"></div>
-
-</div>
+<div id="preview"></div>
+<div id="results"></div>
 
 <script>
-let currentImage=null;
+let model;
+let referenceVector=null;
 
-function handleImageUpload(e){
-    const file=e.target.files[0];
-    if(!file)return;
-    const reader=new FileReader();
-    reader.onload=ev=>{
-        currentImage=ev.target.result;
-        previewSection.innerHTML=`<div class="image-preview"><img src="${currentImage}"></div>`;
-        analyzeBtn.disabled=false;
-        metricsSection.innerHTML='';
-        resultSection.innerHTML='';
-    };
-    reader.readAsDataURL(file);
+async function loadModel(){
+    model = await mobilenet.load();
+    console.log("Model Loaded");
+}
+loadModel();
+
+/* ---------- FEATURE EXTRACTION ---------- */
+async function extractFeatures(img){
+    const tensor = tf.browser.fromPixels(img)
+        .resizeNearestNeighbor([224,224])
+        .toFloat()
+        .expandDims();
+
+    const embeddings = model.infer(tensor,true);
+    return embeddings.dataSync();
 }
 
-function analyzeImage(){
-    previewSection.innerHTML+=`<div class="loading"><h2>Analyzing Image...</h2></div>`;
-    analyzeBtn.disabled=true;
-    setTimeout(runCVPipeline,1000);
+/* ---------- DISTANCE MEASURE ---------- */
+function cosineDistance(a,b){
+    let dot=0,magA=0,magB=0;
+    for(let i=0;i<a.length;i++){
+        dot+=a[i]*b[i];
+        magA+=a[i]*a[i];
+        magB+=b[i]*b[i];
+    }
+    return 1-(dot/(Math.sqrt(magA)*Math.sqrt(magB)));
 }
 
-/* ===== REAL COMPUTER VISION ===== */
+/* ---------- MAIN ANALYSIS ---------- */
+async function analyze(){
+    const file=fileInput.files[0];
+    if(!file) return alert("Upload image first");
 
-function runCVPipeline(){
     const img=new Image();
-    img.src=currentImage;
+    img.src=URL.createObjectURL(file);
+    preview.innerHTML="<h2>Processing with Deep Learning...</h2>";
 
-    img.onload=()=>{
-        const canvas=document.createElement("canvas");
-        const ctx=canvas.getContext("2d");
-        canvas.width=256;canvas.height=256;
-        ctx.drawImage(img,0,0,256,256);
+    img.onload=async ()=>{
+        preview.innerHTML=`<img src="${img.src}" width="300">`;
 
-        const {data}=ctx.getImageData(0,0,256,256);
-        const gray=toGray(data);
-        const blur=gaussianBlur(gray,256,256);
-        const edges=sobel(blur,256,256);
-        const texture=laplacianVar(blur);
-        const bright=brightnessDefects(blur);
+        const features = await extractFeatures(img);
 
-        const metrics={
-            edgeDensity:Math.round(edges*100),
-            textureVariance:Math.round(texture*100),
-            colorAnomalies:Math.round(bright*100)
-        };
+        // First image becomes reference "GOOD PRODUCT"
+        if(!referenceVector){
+            referenceVector = features;
+            results.innerHTML=`
+                <div class="card pass">
+                <h2>✅ Reference Product Saved</h2>
+                <p>Upload defective product to test detection</p>
+                </div>`;
+            return;
+        }
 
-        metrics.isDefective=edges>0.12||texture>0.18||bright>0.08;
-        showResults(metrics);
+        const anomalyScore = cosineDistance(referenceVector,features);
+
+        const defectProbability = Math.min(anomalyScore*3,1);
+        const confidence = (defectProbability*100).toFixed(1);
+
+        const defective = defectProbability > 0.35;
+
+        results.innerHTML=`
+        <div class="card ${defective?'fail':'pass'}">
+        <h2>${defective?'❌ DEFECT DETECTED':'✅ QUALITY PASSED'}</h2>
+        <h3>Defect Probability: ${confidence}%</h3>
+        <p>Anomaly Score: ${anomalyScore.toFixed(3)}</p>
+        </div>`;
     }
-}
-
-function toGray(data){
-    let g=[];
-    for(let i=0;i<data.length;i+=4)
-        g.push(.299*data[i]+.587*data[i+1]+.114*data[i+2]);
-    return g;
-}
-
-function gaussianBlur(p,w,h){
-    const out=new Array(p.length);
-    const k=[1,2,1,2,4,2,1,2,1];
-    for(let y=1;y<h-1;y++)
-    for(let x=1;x<w-1;x++){
-        let sum=0,i=0;
-        for(let ky=-1;ky<=1;ky++)
-        for(let kx=-1;kx<=1;kx++)
-            sum+=p[(y+ky)*w+(x+kx)]*k[i++];
-        out[y*w+x]=sum/16;
-    }
-    return out;
-}
-
-function sobel(p,w,h){
-    let count=0;
-    for(let y=1;y<h-1;y++)
-    for(let x=1;x<w-1;x++){
-        const gx=-p[(y-1)*w+x-1]-2*p[y*w+x-1]-p[(y+1)*w+x-1]
-                +p[(y-1)*w+x+1]+2*p[y*w+x+1]+p[(y+1)*w+x+1];
-        const gy=-p[(y-1)*w+x-1]-2*p[(y-1)*w+x]-p[(y-1)*w+x+1]
-                +p[(y+1)*w+x-1]+2*p[(y+1)*w+x]+p[(y+1)*w+x+1];
-        if(Math.sqrt(gx*gx+gy*gy)>120)count++;
-    }
-    return count/(w*h);
-}
-
-function laplacianVar(p){
-    let m=0;p.forEach(v=>m+=v);m/=p.length;
-    let v=0;p.forEach(x=>v+=(x-m)*(x-m));
-    return Math.sqrt(v)/255;
-}
-
-function brightnessDefects(p){
-    let bad=0;
-    p.forEach(v=>{if(v<20||v>235)bad++});
-    return bad/p.length;
-}
-
-function showResults(m){
-    document.querySelector(".loading")?.remove();
-
-    metricsSection.innerHTML=`
-    <div class="metrics-grid">
-        <div class="metric-card ${m.edgeDensity>35?'metric-bad':'metric-good'}">
-            <div class="metric-value">${m.edgeDensity}%</div>
-            Edge Density
-        </div>
-        <div class="metric-card ${m.textureVariance>28?'metric-bad':'metric-good'}">
-            <div class="metric-value">${m.textureVariance}%</div>
-            Surface Roughness
-        </div>
-        <div class="metric-card ${m.colorAnomalies>18?'metric-bad':'metric-good'}">
-            <div class="metric-value">${m.colorAnomalies}%</div>
-            Brightness Defects
-        </div>
-    </div>`;
-
-    resultSection.innerHTML=m.isDefective?
-    `<div class="result-card result-fail"><h2>❌ DEFECT DETECTED</h2></div>`:
-    `<div class="result-card result-pass"><h2>✅ QUALITY PASSED</h2></div>`;
-
-    analyzeBtn.disabled=false;
 }
 </script>
 </body>
